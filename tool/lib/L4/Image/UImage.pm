@@ -7,7 +7,7 @@ package L4::Image::UImage;
 use warnings;
 use strict;
 use Exporter;
-use L4::Digest::CRC;
+use Compress::Zlib qw/crc32/;
 use L4::Image::Utils qw/error check_sysread check_syswrite filepos_set/;
 
 use vars qw(@ISA @EXPORT);
@@ -47,11 +47,14 @@ sub uimage_header_update
 
   $ih_size = (stat($fd))[7] - UIMAGE_HEADER_SIZE;
 
-  my $ctx = Digest::CRC->new(type => "crc32");
+  my $dcrc = 0;
+  my $chunk;
+  while (my $len = sysread($fd, $chunk, 64 * 1024))
+    {
+      $dcrc = crc32($chunk, $dcrc);
+    }
 
-  $ctx->addfile($fd);
-
-  $ih_dcrc = $ctx->digest;
+  $ih_dcrc = $dcrc;
 
   my $uimage_header = pack($uimage_pattern,
                            $ih_magic,
@@ -67,9 +70,7 @@ sub uimage_header_update
                            $ih_comp,
                            $ih_name);
 
-  $ctx = Digest::CRC->new(type => "crc32");
-  $ctx->add($uimage_header);
-  $ih_hcrc = $ctx->digest;
+  $ih_hcrc = crc32($uimage_header);
 
   $uimage_header = pack($uimage_pattern,
                         $ih_magic,

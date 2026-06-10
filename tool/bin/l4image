@@ -1226,7 +1226,7 @@ for (my $i = 0; $i < @ARGV; ++$i)
         die "Need to give output file" unless defined $outfile;
         # Requires to have libpar-perl installed
         system("pp -n -P -o $outfile -I $libdir"
-               ." -M L4::Image:: -M L4::ModList -M L4::Digest::CRC $0");
+               ." -M L4::Image:: -M L4::ModList $0");
         my $o = `$outfile -h 2>&1`;
         if ($?)
           {
