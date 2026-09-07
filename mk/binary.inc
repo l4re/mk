@@ -601,7 +601,7 @@ CPPFLAGS+= $(if $(DEBUG_MODE),$(CPPFLAGS-DEBUG_MODE))
 CPPFLAGS+= $(LIBCINCDIR)
 CPPFLAGS+= $(call bid_flag_variants,CPPFLAGS)
 
-ifneq ($(MODE),host)
+ifeq ($(filter host targetsys,$(MODE)),)
 CPPFLAGS += -include l4/bid_config.h
 
 # We're usually using Linux cross compilers for L4Re. Make sure the're not
