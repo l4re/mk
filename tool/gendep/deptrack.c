@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <sys/types.h>
@@ -34,6 +35,7 @@ static struct
 } regexps;
 
 static char * executable_name;
+static char * invocation_name;
 static char * wanted_executable_name;
 static char * target;
 static char * depfile_name;
@@ -198,6 +200,32 @@ gendep_getenv (char **dest, char *what)
   return !! (*dest);
 }
 
+/**
+ * Return the last component of a file name.
+ *
+ * Like basename(), but guaranteed to not modify the passed string.
+ */
+static char* base_name (char *fn)
+{
+  char *slash = strrchr(fn, '/');
+
+  return slash ? slash + 1 : fn;
+}
+
+/**
+ * Check whether the current process is known under the given name.
+ *
+ * Both the name of the executable and the name the process was invoked with
+ * are taken into account, because the two may differ (see
+ * get_executable_name()).
+ */
+static int
+executable_is (const char *name)
+{
+  return (executable_name && !strcmp (name, executable_name))
+         || (invocation_name && !strcmp (name, invocation_name));
+}
+
 /*
   Do hairy stuff with regexps and environment variables.
  */
@@ -218,11 +246,11 @@ setup_regexps (void)
   if (!gendep_getenv (&wanted_executable_name, "BINARY"))
     return;
 
-  if (strcmp (wanted_executable_name, executable_name))
+  if (!executable_is (wanted_executable_name))
     {
       /* support two binary names (e.g. for arch-foo-X and X) */
       if (!gendep_getenv (&wanted_executable_name, "BINARY_ALT1")
-          || strcmp (wanted_executable_name, executable_name))
+          || !executable_is (wanted_executable_name))
 	return;
     }
 
@@ -231,7 +259,8 @@ setup_regexps (void)
   if (!gendep_getenv (&target, "TARGET"))
     return;
 
-  if (!gendep_getenv (&regexp_val, executable_name))
+  if (!gendep_getenv (&regexp_val, executable_name)
+      && !(invocation_name && gendep_getenv (&regexp_val, invocation_name)))
     return;
 
   /*
@@ -289,12 +318,39 @@ setup_regexps (void)
   } while (start < end);
 }
 
+#ifdef __linux
+/**
+ * Get the command name the current process was started with.
+ *
+ * Returns argv[0] or 0 if it cannot be determined. The raw openat() syscall
+ * is used because open()/fopen() are overridden by gendep itself.
+ */
+static char* get_invocation_name(void)
+{
+  char cmdline[STRLEN];
+  ssize_t sz;
+  int fd = syscall(SYS_openat, AT_FDCWD, "/proc/self/cmdline", O_RDONLY, 0);
+
+  if (fd < 0)
+    return 0;
+
+  sz = read(fd, cmdline, sizeof(cmdline) - 1);
+  close(fd);
+  if (sz <= 0)
+    return 0;
+
+  /* argv[0] is the first of the '\0' separated entries */
+  cmdline[sz] = '\0';
+
+  return xstrdup(base_name(cmdline));
+}
+#endif
+
 /*
   Try to get the name of the binary.  Is there a portable way to do this?
  */
 static void get_executable_name(void)
 {
-  char *basename_p;
 #ifdef __linux
   char cmd[STRLEN];
   /* /proc/self/exe is **always** a symbolic link */
@@ -305,6 +361,14 @@ static void get_executable_name(void)
       exit(-1);
     }
   cmd[sz] = '\0';
+
+  /* The link target has all symlinks resolved and therefore may name a
+     different file than the command that was actually invoked: on
+     Debian-like systems 'aarch64-linux-gnu-ld', for instance, is a symlink
+     to 'aarch64-linux-gnu-ld.bfd'. Keep argv[0] too, because that is the
+     name a tool reports for itself and hence the name the build system
+     knows it by. */
+  invocation_name = get_invocation_name();
 #elif defined(__APPLE__) || defined(__FreeBSD__)
   int mib[3], arglen;
   size_t size;
@@ -346,14 +410,7 @@ static void get_executable_name(void)
 #  error "Retrieving the executable name is not implemented for your platform."
 #endif
 
-  /* ugh.  man 3 basename -> ?  */
-  basename_p =  strrchr(cmd, '/');
-  if (basename_p)
-    basename_p++;
-  else
-    basename_p = cmd;
-
-  executable_name = xstrdup(basename_p);
+  executable_name = xstrdup(base_name(cmd));
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
   free(procargs);
