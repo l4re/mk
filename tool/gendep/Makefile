@@ -54,7 +54,15 @@ $(info gendep: Building $(if $(LIB32),32bit)$(if $(LIB64),64bit) variant)
 endif
 endif
 
+# The variants are searched through BID_LIBGENDEP_PATHS, where the dynamic
+# loader simply picks the first libgendep.so it can load. Drop the variants
+# that are not built (anymore), otherwise a leftover from an earlier host
+# toolchain silently shadows the current library.
+STALE_LIBS := $(filter-out $(LIB),$(LIB96) $(OBJ_DIR)/32/libgendep.so \
+                                  $(OBJ_DIR)/64/libgendep.so)
+
 all:: $(LIB)
+	$(VERBOSE)$(RM) $(STALE_LIBS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c $(SRC_DIR)/Makefile
 	@$(COMP_MESSAGE)
